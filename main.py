@@ -1,4 +1,5 @@
 from fastmcp import FastMCP
+import aiosqlite
 import json
 import sqlite3
 import os
@@ -10,67 +11,62 @@ from typing import Optional
 mcp = FastMCP("Expense Tracker", "1.0.0")
 
 # /tmp is writable on both local machines and FastMCP cloud
-TEMP_DIR = tempfile.gettempdir()
-DB_PATH = os.path.join(TEMP_DIR, "expenses.db")
+DB_PATH = os.path.join(tempfile.gettempdir(), "expenses.db")
 CATEGORIES_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "categories.json")
 
 print(f"Database path: {DB_PATH}")
 
 
-# ── Database initialisation ───────────────────────────────────────────────────
-def get_db() -> sqlite3.Connection:
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
-
-
-def init_db():
-    """Create tables and verify write access."""
-    try:
-        with get_db() as conn:
-            conn.execute("PRAGMA journal_mode=WAL")
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS expenses (
-                    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-                    title       TEXT    NOT NULL,
-                    amount      REAL    NOT NULL,
-                    category    TEXT    NOT NULL,
-                    subcategory TEXT    DEFAULT '',
-                    note        TEXT    DEFAULT '',
-                    date        TEXT    NOT NULL,
-                    created_at  TEXT    NOT NULL
-                )
-            """)
-            # Quick write-access check
-            conn.execute(
-                "INSERT OR IGNORE INTO expenses(title,amount,category,date,created_at) "
-                "VALUES('__init_test__',0,'test','2000-01-01','2000-01-01')"
+# ── Database initialisation (sync once at startup) ────────────────────────────
+def _init_db() -> None:
+    """Create table and verify write access using sync sqlite3 at startup."""
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS expenses (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                title       TEXT    NOT NULL,
+                amount      REAL    NOT NULL,
+                category    TEXT    NOT NULL,
+                subcategory TEXT    DEFAULT '',
+                note        TEXT    DEFAULT '',
+                date        TEXT    NOT NULL,
+                created_at  TEXT    NOT NULL
             )
-            conn.execute("DELETE FROM expenses WHERE category='test'")
-            conn.commit()
-        print("✅ Database initialised with write access.")
-    except Exception as e:
-        print(f"❌ Database init error: {e}")
-        raise
+        """)
+        conn.execute(
+            "INSERT OR IGNORE INTO expenses(title,amount,category,date,created_at) "
+            "VALUES('__init_test__',0,'test','2000-01-01','2000-01-01')"
+        )
+        conn.execute("DELETE FROM expenses WHERE category='test'")
+        conn.commit()
 
 
-init_db()
+_init_db()
+print("✅ Database initialised with write access.")
 
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
-def load_categories() -> dict:
-    with open(CATEGORIES_PATH, "r") as f:
-        return json.load(f)
+# ── Async helpers ─────────────────────────────────────────────────────────────
+
+async def _load_categories() -> dict:
+    """Read categories.json asynchronously."""
+    import asyncio
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(
+        None,
+        lambda: json.load(open(CATEGORIES_PATH))
+    )
 
 
-def valid_category_ids() -> list[str]:
-    return [c["id"] for c in load_categories()["categories"]]
+async def _valid_category_ids() -> list[str]:
+    data = await _load_categories()
+    return [c["id"] for c in data["categories"]]
 
 
-# ── Tools ─────────────────────────────────────────────────────────────────────
+# ── MCP Tools ─────────────────────────────────────────────────────────────────
 
 @mcp.tool
-def add_expense(
+async def add_expense(
     title: str,
     amount: float,
     category: str,
@@ -95,7 +91,7 @@ def add_expense(
     if amount <= 0:
         return json.dumps({"error": "Amount must be a positive number."})
 
-    valid_cats = valid_category_ids()
+    valid_cats = await _valid_category_ids()
     if category not in valid_cats:
         return json.dumps({
             "error": f"Invalid category '{category}'.",
@@ -104,36 +100,31 @@ def add_expense(
 
     expense_date = date or datetime.now().strftime("%Y-%m-%d")
     created_at   = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    sub = subcategory or ""
-    n   = note or ""
+    sub  = subcategory or ""
+    note = note or ""
 
-    with get_db() as conn:
-        cursor = conn.execute(
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
             """INSERT INTO expenses (title, amount, category, subcategory, note, date, created_at)
                VALUES (?, ?, ?, ?, ?, ?, ?)""",
-            (title, amount, category, sub, n, expense_date, created_at),
+            (title, amount, category, sub, note, expense_date, created_at),
         )
-        conn.commit()
+        await db.commit()
         expense_id = cursor.lastrowid
 
     return json.dumps({
         "success": True,
         "message": f"Expense '{title}' of ₹{amount:.2f} added successfully.",
         "expense": {
-            "id": expense_id,
-            "title": title,
-            "amount": amount,
-            "category": category,
-            "subcategory": sub,
-            "note": n,
-            "date": expense_date,
-            "created_at": created_at,
+            "id": expense_id, "title": title, "amount": amount,
+            "category": category, "subcategory": sub, "note": note,
+            "date": expense_date, "created_at": created_at,
         },
     }, indent=2)
 
 
 @mcp.tool
-def get_expenses(
+async def get_expenses(
     category: Optional[str] = None,
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
@@ -151,7 +142,7 @@ def get_expenses(
     Returns:
         JSON string with list of expenses and total amount.
     """
-    query = "SELECT * FROM expenses WHERE 1=1"
+    query  = "SELECT * FROM expenses WHERE 1=1"
     params: list = []
 
     if category:
@@ -167,10 +158,12 @@ def get_expenses(
     query += " ORDER BY date DESC LIMIT ?"
     params.append(limit)
 
-    with get_db() as conn:
-        rows = conn.execute(query, params).fetchall()
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(query, params) as cur:
+            rows = await cur.fetchall()
 
-    expenses = [dict(row) for row in rows]
+    expenses = [dict(r) for r in rows]
     total    = sum(e["amount"] for e in expenses)
 
     return json.dumps({
@@ -181,7 +174,7 @@ def get_expenses(
 
 
 @mcp.tool
-def delete_expense(expense_id: int) -> str:
+async def delete_expense(expense_id: int) -> str:
     """
     Delete an expense by its ID.
 
@@ -191,14 +184,18 @@ def delete_expense(expense_id: int) -> str:
     Returns:
         JSON string confirming deletion or an error message.
     """
-    with get_db() as conn:
-        row = conn.execute(
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
             "SELECT * FROM expenses WHERE id = ?", (expense_id,)
-        ).fetchone()
+        ) as cur:
+            row = await cur.fetchone()
+
         if not row:
             return json.dumps({"error": f"No expense found with ID {expense_id}."})
-        conn.execute("DELETE FROM expenses WHERE id = ?", (expense_id,))
-        conn.commit()
+
+        await db.execute("DELETE FROM expenses WHERE id = ?", (expense_id,))
+        await db.commit()
 
     return json.dumps({
         "success": True,
@@ -207,7 +204,7 @@ def delete_expense(expense_id: int) -> str:
 
 
 @mcp.tool
-def update_expense(
+async def update_expense(
     expense_id: int,
     title: Optional[str] = None,
     amount: Optional[float] = None,
@@ -231,28 +228,33 @@ def update_expense(
     Returns:
         JSON string with updated expense details.
     """
-    with get_db() as conn:
-        row = conn.execute(
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
             "SELECT * FROM expenses WHERE id = ?", (expense_id,)
-        ).fetchone()
+        ) as cur:
+            row = await cur.fetchone()
+
         if not row:
             return json.dumps({"error": f"No expense found with ID {expense_id}."})
 
         updated = dict(row)
-        if title      is not None: updated["title"]       = title
-        if amount     is not None:
+
+        if title       is not None: updated["title"]       = title
+        if amount      is not None:
             if amount <= 0:
                 return json.dumps({"error": "Amount must be a positive number."})
             updated["amount"] = amount
-        if category   is not None:
-            if category not in valid_category_ids():
+        if category    is not None:
+            valid_cats = await _valid_category_ids()
+            if category not in valid_cats:
                 return json.dumps({"error": f"Invalid category '{category}'."})
             updated["category"] = category
         if subcategory is not None: updated["subcategory"] = subcategory
         if note        is not None: updated["note"]        = note
         if date        is not None: updated["date"]        = date
 
-        conn.execute(
+        await db.execute(
             """UPDATE expenses
                SET title=?, amount=?, category=?, subcategory=?, note=?, date=?
                WHERE id=?""",
@@ -262,7 +264,7 @@ def update_expense(
                 expense_id,
             ),
         )
-        conn.commit()
+        await db.commit()
 
     return json.dumps({
         "success": True,
@@ -272,7 +274,7 @@ def update_expense(
 
 
 @mcp.tool
-def get_monthly_summary(year: int, month: int) -> str:
+async def get_monthly_summary(year: int, month: int) -> str:
     """
     Get a spending summary grouped by category for a given month.
 
@@ -284,28 +286,29 @@ def get_monthly_summary(year: int, month: int) -> str:
         JSON string with per-category totals and overall total.
     """
     month_str = f"{year}-{month:02d}"
-    categories_data = {c["id"]: c for c in load_categories()["categories"]}
 
-    with get_db() as conn:
-        rows = conn.execute(
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
             """SELECT category, COUNT(*) as count, SUM(amount) as total
                FROM expenses
                WHERE strftime('%Y-%m', date) = ?
-               GROUP BY category
-               ORDER BY total DESC""",
+               GROUP BY category ORDER BY total DESC""",
             (month_str,),
-        ).fetchall()
+        ) as cur:
+            rows = await cur.fetchall()
 
-    summary     = []
-    grand_total = 0.0
+    cat_data    = await _load_categories()
+    cat_map     = {c["id"]: c for c in cat_data["categories"]}
+    summary, grand_total = [], 0.0
+
     for row in rows:
-        cat_id   = row["category"]
-        cat_info = categories_data.get(cat_id, {})
+        cat_info = cat_map.get(row["category"], {})
         total    = round(row["total"], 2)
         grand_total += total
         summary.append({
-            "category_id":   cat_id,
-            "category_name": cat_info.get("name", cat_id),
+            "category_id":   row["category"],
+            "category_name": cat_info.get("name", row["category"]),
             "icon":          cat_info.get("icon", ""),
             "transactions":  row["count"],
             "total":         total,
@@ -319,33 +322,32 @@ def get_monthly_summary(year: int, month: int) -> str:
 
 
 @mcp.tool
-def get_category_summary() -> str:
+async def get_category_summary() -> str:
     """
     Get all-time total spending grouped by category.
 
     Returns:
         JSON string with per-category totals.
     """
-    categories_data = {c["id"]: c for c in load_categories()["categories"]}
-
-    with get_db() as conn:
-        rows = conn.execute(
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
             """SELECT category, COUNT(*) as count, SUM(amount) as total
-               FROM expenses
-               GROUP BY category
-               ORDER BY total DESC"""
-        ).fetchall()
+               FROM expenses GROUP BY category ORDER BY total DESC"""
+        ) as cur:
+            rows = await cur.fetchall()
 
-    summary     = []
-    grand_total = 0.0
+    cat_data    = await _load_categories()
+    cat_map     = {c["id"]: c for c in cat_data["categories"]}
+    summary, grand_total = [], 0.0
+
     for row in rows:
-        cat_id   = row["category"]
-        cat_info = categories_data.get(cat_id, {})
+        cat_info = cat_map.get(row["category"], {})
         total    = round(row["total"], 2)
         grand_total += total
         summary.append({
-            "category_id":   cat_id,
-            "category_name": cat_info.get("name", cat_id),
+            "category_id":   row["category"],
+            "category_name": cat_info.get("name", row["category"]),
             "icon":          cat_info.get("icon", ""),
             "transactions":  row["count"],
             "total":         total,
@@ -358,14 +360,15 @@ def get_category_summary() -> str:
 
 
 @mcp.tool
-def list_categories() -> str:
+async def list_categories() -> str:
     """
     List all available expense categories and their subcategories.
 
     Returns:
         JSON string with all categories.
     """
-    return json.dumps(load_categories(), indent=2)
+    data = await _load_categories()
+    return json.dumps(data, indent=2)
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
