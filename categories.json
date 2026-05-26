@@ -1,0 +1,94 @@
+{
+    "categories": [
+        {
+            "id": "food_dining",
+            "name": "Food & Dining",
+            "icon": "🍽️",
+            "subcategories": ["Groceries", "Restaurants", "Cafes", "Fast Food", "Food Delivery"]
+        },
+        {
+            "id": "transportation",
+            "name": "Transportation",
+            "icon": "🚗",
+            "subcategories": ["Fuel", "Public Transit", "Taxi/Cab", "Parking", "Vehicle Maintenance"]
+        },
+        {
+            "id": "housing",
+            "name": "Housing",
+            "icon": "🏠",
+            "subcategories": ["Rent", "Mortgage", "Home Maintenance", "Furniture", "Home Decor"]
+        },
+        {
+            "id": "utilities",
+            "name": "Utilities",
+            "icon": "💡",
+            "subcategories": ["Electricity", "Water", "Gas", "Internet", "Phone Bill"]
+        },
+        {
+            "id": "healthcare",
+            "name": "Healthcare",
+            "icon": "🏥",
+            "subcategories": ["Doctor Visits", "Medicines", "Health Insurance", "Gym", "Mental Health"]
+        },
+        {
+            "id": "shopping",
+            "name": "Shopping",
+            "icon": "🛍️",
+            "subcategories": ["Clothing", "Electronics", "Online Shopping", "Accessories", "Books"]
+        },
+        {
+            "id": "entertainment",
+            "name": "Entertainment",
+            "icon": "🎬",
+            "subcategories": ["Movies", "Streaming Services", "Games", "Concerts", "Sports Events"]
+        },
+        {
+            "id": "education",
+            "name": "Education",
+            "icon": "📚",
+            "subcategories": ["Tuition", "Online Courses", "Books & Stationery", "Workshops", "Certifications"]
+        },
+        {
+            "id": "travel",
+            "name": "Travel",
+            "icon": "✈️",
+            "subcategories": ["Flights", "Hotels", "Vacation Packages", "Travel Insurance", "Sightseeing"]
+        },
+        {
+            "id": "personal_care",
+            "name": "Personal Care",
+            "icon": "💇",
+            "subcategories": ["Haircut", "Skincare", "Cosmetics", "Spa", "Salon"]
+        },
+        {
+            "id": "investments",
+            "name": "Investments & Savings",
+            "icon": "💰",
+            "subcategories": ["Stocks", "Mutual Funds", "Fixed Deposit", "Crypto", "Emergency Fund"]
+        },
+        {
+            "id": "subscriptions",
+            "name": "Subscriptions",
+            "icon": "📱",
+            "subcategories": ["Netflix", "Spotify", "Software", "Magazines", "Cloud Storage"]
+        },
+        {
+            "id": "gifts_donations",
+            "name": "Gifts & Donations",
+            "icon": "🎁",
+            "subcategories": ["Birthday Gifts", "Wedding Gifts", "Charity", "Religious Donations", "Festival Expenses"]
+        },
+        {
+            "id": "taxes",
+            "name": "Taxes & Fees",
+            "icon": "🧾",
+            "subcategories": ["Income Tax", "GST", "Bank Fees", "Late Fees", "Government Fees"]
+        },
+        {
+            "id": "other",
+            "name": "Other",
+            "icon": "📦",
+            "subcategories": ["Miscellaneous", "Unexpected Expenses", "Cash Withdrawal"]
+        }
+    ]
+}
