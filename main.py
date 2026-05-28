@@ -3,15 +3,13 @@ import aiosqlite
 import json
 import sqlite3
 import os
-import tempfile
 from datetime import datetime
 from typing import Optional
 
 # ── Server setup ──────────────────────────────────────────────────────────────
 mcp = FastMCP("Expense Tracker", "1.0.0")
 
-# /tmp is writable on both local machines and FastMCP cloud
-DB_PATH = os.path.join(tempfile.gettempdir(), "expenses.db")
+DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "expenses.db")
 CATEGORIES_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "categories.json")
 
 print(f"Database path: {DB_PATH}")
